@@ -1,142 +1,145 @@
+// Copyright 2017 The Ebiten Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build example
+// +build example
+
 package main
 
 import (
-	"fmt"
+	"bytes"
+	"image"
+	_ "image/png"
+	"os"
+
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil" //ebiten工具集
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"image/color"
-	"log"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	rplatformer "github.com/hajimehoshi/ebiten/v2/examples/resources/images/platformer"
 )
 
 const (
-	screenWidth  = 640
-	screenHeight = 480
-	gridSize     = 10
-	xNumInScreen = screenWidth / gridSize
-	yNumInScreen = screenHeight / gridSize
+	// Settings
+	screenWidth  = 960
+	screenHeight = 540
 )
+
+var (
+	leftSprite      *ebiten.Image
+	rightSprite     *ebiten.Image
+	idleSprite      *ebiten.Image
+	backgroundImage *ebiten.Image
+)
+
+func init() {
+	data, err := os.ReadFile("img/blue_plane.png")
+	if err != nil {
+		panic(err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		panic(err)
+	}
+	idleSprite = ebiten.NewImageFromImage(img)
+
+	img, _, err = image.Decode(bytes.NewReader(rplatformer.Background_png))
+	if err != nil {
+		panic(err)
+	}
+	backgroundImage = ebiten.NewImageFromImage(img)
+}
 
 const (
-	dirNone = iota
-	dirLeft
-	dirRight
-	dirDown
-	dirUp
+	unit    = 16
+	groundY = 380
 )
 
-type Position struct {
-	X int
-	Y int
+type char struct {
+	x  int
+	y  int
+	vx int
+	vy int
+}
+
+func (c *char) update() {
+	c.x += c.vx
+	c.y += c.vy
+	if c.y > groundY*unit {
+		c.y = groundY * unit
+	}
+	if c.vx > 0 {
+		c.vx -= 4
+	} else if c.vx < 0 {
+		c.vx += 4
+	}
+	if c.vy > 0 {
+		c.vy -= 4
+	} else if c.vy < 0 {
+		c.vy += 4
+	}
+}
+
+func (c *char) draw(screen *ebiten.Image) {
+	s := idleSprite
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(0.5, 0.5)
+	op.GeoM.Translate(float64(c.x)/unit, float64(c.y)/unit)
+	screen.DrawImage(s, op)
 }
 
 type Game struct {
-	moveDirection int
-	snakeBody     []Position
-	timer         int
-	moveTime      int
-}
-
-func (g *Game) reset() {
-	g.snakeBody[0].X = xNumInScreen / 2
-	g.snakeBody[0].Y = yNumInScreen / 2
-	g.snakeBody[1].X = g.snakeBody[0].X - 1
-	g.snakeBody[1].Y = g.snakeBody[0].Y
-	g.snakeBody[2].X = g.snakeBody[0].X + 1
-	g.snakeBody[2].Y = g.snakeBody[0].Y
-	g.snakeBody[3].X = g.snakeBody[0].X
-	g.snakeBody[3].Y = g.snakeBody[0].Y - 1
+	gopher *char
 }
 
 func (g *Game) Update() error {
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) || inpututil.IsKeyJustPressed(ebiten.KeyA) {
-		if g.moveDirection != dirRight {
-			g.moveDirection = dirLeft
-		}
-	} else if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) || inpututil.IsKeyJustPressed(ebiten.KeyD) {
-		if g.moveDirection != dirLeft {
-			g.moveDirection = dirRight
-		}
-	} else if inpututil.IsKeyJustPressed(ebiten.KeyArrowDown) || inpututil.IsKeyJustPressed(ebiten.KeyS) {
-		if g.moveDirection != dirUp {
-			g.moveDirection = dirDown
-		}
-	} else if inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) || inpututil.IsKeyJustPressed(ebiten.KeyW) {
-		if g.moveDirection != dirDown {
-			g.moveDirection = dirUp
-		}
-	} else if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.reset()
+	if g.gopher == nil {
+		g.gopher = &char{x: 50 * unit, y: groundY * unit}
 	}
-	if g.needsToMoveSnake() {
-		switch g.moveDirection {
-		case dirLeft:
-			g.snakeBody[0].X--
-			g.snakeBody[1].X = g.snakeBody[0].X - 1
-			g.snakeBody[2].X = g.snakeBody[0].X + 1
-			g.snakeBody[3].X = g.snakeBody[0].X
-		case dirRight:
-			g.snakeBody[0].X++
-			g.snakeBody[1].X = g.snakeBody[0].X - 1
-			g.snakeBody[2].X = g.snakeBody[0].X + 1
-			g.snakeBody[3].X = g.snakeBody[0].X
-		case dirDown:
-			g.snakeBody[0].Y++
-			g.snakeBody[1].Y = g.snakeBody[0].Y
-			g.snakeBody[2].Y = g.snakeBody[0].Y
-			g.snakeBody[3].Y = g.snakeBody[0].Y - 1
-		case dirUp:
-			g.snakeBody[0].Y--
-			g.snakeBody[1].Y = g.snakeBody[0].Y
-			g.snakeBody[2].Y = g.snakeBody[0].Y
-			g.snakeBody[3].Y = g.snakeBody[0].Y - 1
-		}
+
+	// Controls
+	if ebiten.IsKeyPressed(ebiten.KeyA) || ebiten.IsKeyPressed(ebiten.KeyArrowLeft) {
+		g.gopher.vx = -4 * unit
+	} else if ebiten.IsKeyPressed(ebiten.KeyD) || ebiten.IsKeyPressed(ebiten.KeyArrowRight) {
+		g.gopher.vx = 4 * unit
+	} else if ebiten.IsKeyPressed(ebiten.KeyW) || ebiten.IsKeyPressed(ebiten.KeyArrowUp) {
+		g.gopher.vy = -4 * unit
+	} else if ebiten.IsKeyPressed(ebiten.KeyS) || ebiten.IsKeyPressed(ebiten.KeyArrowDown) {
+		g.gopher.vy = 4 * unit
 	}
-	g.timer++
-	fmt.Println(g.timer)
+	g.gopher.update()
 	return nil
 }
 
-func (g *Game) needsToMoveSnake() bool {
-	return g.timer%g.moveTime == 0
-}
-
 func (g *Game) Draw(screen *ebiten.Image) {
-	for _, v := range g.snakeBody {
-		ebitenutil.DrawRect(screen, float64(v.X*gridSize), float64(v.Y*gridSize), gridSize, gridSize, color.RGBA{0x80, 0xa0, 0xc0, 0xff})
-	}
-	ebitenutil.DrawRect(screen, float64(xNumInScreen/4*gridSize), float64(yNumInScreen/4*gridSize), gridSize, gridSize, color.RGBA{0xFF, 0x00, 0x00, 0xff})
-	if g.moveDirection == dirNone {
-		ebitenutil.DebugPrint(screen, fmt.Sprintf("Press up/down/left/right to start"))
-	} else {
-		ebitenutil.DebugPrint(screen, fmt.Sprintf("FPS: %0.2f", ebiten.CurrentFPS()))
-	}
+	// Draws Background Image
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(0.5, 0.5)
+	screen.DrawImage(backgroundImage, op)
+
+	// Draws the Gopher
+	g.gopher.draw(screen)
+
+	ebitenutil.DebugPrint(screen, msg)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return screenWidth, screenHeight
 }
 
-func newGame() *Game {
-	g := &Game{
-		snakeBody: make([]Position, 4),
-		moveTime:  4,
-	}
-	g.snakeBody[0].X = xNumInScreen / 2
-	g.snakeBody[0].Y = yNumInScreen / 2
-	g.snakeBody[1].X = g.snakeBody[0].X - 1
-	g.snakeBody[1].Y = g.snakeBody[0].Y
-	g.snakeBody[2].X = g.snakeBody[0].X + 1
-	g.snakeBody[2].Y = g.snakeBody[0].Y
-	g.snakeBody[3].X = g.snakeBody[0].X
-	g.snakeBody[3].Y = g.snakeBody[0].Y - 1
-	return g
-}
-
 func main() {
 	ebiten.SetWindowSize(screenWidth, screenHeight)
-	ebiten.SetWindowTitle("弹幕游戏")
-	if err := ebiten.RunGame(newGame()); err != nil {
-		log.Fatal(err)
+	ebiten.SetWindowTitle("Platformer (Ebiten Demo)")
+	if err := ebiten.RunGame(&Game{}); err != nil {
+		panic(err)
 	}
 }
